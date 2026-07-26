@@ -427,3 +427,78 @@ export function buildAuditReport(projects) {
   }
   return { findings, summary: { total: findings.length, critical: findings.filter(f => f.level === 'critical').length } };
 }
+
+/**
+ * Git history results.
+ *
+ * The distinction this table exists to draw: `still tracked` is a file you can fix with
+ * `git rm --cached`, everything else is already published and can only be fixed by rotating.
+ * Presenting them the same way would let the worse case hide behind the easier one.
+ */
+export function printHistoryResults(histories, opts = {}) {
+  if (opts.json) {
+    console.log(JSON.stringify(histories, null, 2));
+    return;
+  }
+
+  const total = histories.reduce((n, r) => n + r.findings.length, 0);
+  if (!total) {
+    console.log(chalk.green('\n  ✅  Nothing risky found in git history.\n'));
+    return;
+  }
+
+  console.log(chalk.bold(`\n🕰️  enview history — ${total} risky path${total === 1 ? '' : 's'} across ${histories.length} repo${histories.length === 1 ? '' : 's'}\n`));
+
+  const table = new Table({
+    head: ['Repo', 'Path in history', 'Kind', 'Keys', 'Still tracked', 'First', 'Last'].map(h => chalk.dim(h)),
+    style: { head: [], border: [] },
+  });
+
+  for (const repo of histories) {
+    for (const f of repo.findings) {
+      const keys = f.kind === 'env'
+        ? (f.sensitiveKeys.length ? chalk.yellow(`${f.sensitiveKeys.length} sensitive`) : chalk.dim(`${f.keys.length} keys`))
+        : chalk.dim('—');
+      table.push([
+        repo.repoName,
+        truncate(f.filePath, 40),
+        f.kind === 'key' ? chalk.red(f.why) : f.why,
+        keys,
+        f.stillTracked ? chalk.red('yes') : chalk.dim('no'),
+        formatDate(f.firstCommitted ? new Date(f.firstCommitted) : null),
+        formatDate(f.lastCommitted ? new Date(f.lastCommitted) : null),
+      ]);
+    }
+  }
+  console.log(table.toString());
+  console.log(chalk.dim('\n  History is on every clone, fork and CI cache. Deleting a file does not retract it —'));
+  console.log(chalk.dim('  rotate anything listed here, then remove it from tracking.\n'));
+}
+
+/** Combined guard output, sized for a terminal you glance at rather than read. */
+export function printProtectResults(report) {
+  const { summary, findings } = report;
+  if (summary.critical === 0) {
+    console.log(chalk.green(`\n  ✅  enview protect — nothing critical. ${report.projects.length} projects checked.\n`));
+    return;
+  }
+
+  console.log(chalk.bold.red(`\n🛡️  enview protect — ${summary.critical} critical finding${summary.critical === 1 ? '' : 's'}`));
+  console.log(chalk.dim(`   ${summary.workingTree} on disk · ${summary.history} in git history\n`));
+
+  const table = new Table({
+    head: ['Where', 'Project', 'File', 'What'].map(h => chalk.dim(h)),
+    style: { head: [], border: [] },
+    colWidths: [12, 20, 34, 46],
+    wordWrap: true,
+  });
+
+  for (const f of findings) {
+    const where = f.type === 'in_git_history' ? chalk.red('history') : chalk.yellow('on disk');
+    const what = f.remedy
+      || (f.type === 'plaintext_secrets' ? `${(f.keys || []).length} plaintext credential-shaped keys` : f.type);
+    table.push([where, f.project, truncate(f.file, 33), what]);
+  }
+  console.log(table.toString());
+  console.log('');
+}

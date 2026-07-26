@@ -10,19 +10,41 @@
   "exports": {
     ".": "./src/index.js",
     "./scanner": "./src/scanner.js",
+    "./history": "./src/history.js",
+    "./server": "./src/server.js",
     "./package.json": "./package.json"
   },
   "scripts": {
-    "start": "node bin/enview.js"
+    "start": "node bin/enview.js",
+    "test": "node test/run.mjs",
+    "ui": "node bin/enview.js ui",
+    "protect": "node bin/enview.js protect"
   },
   "keywords": [
-    "dotenv", "env", "secrets", "security", "audit", "cli",
-    "dotenvx", "sops", "encryption", "ai-safety",
-    "environment-variables", "secrets-management", "developer-tools"
+    "dotenv",
+    "env",
+    "secrets",
+    "security",
+    "audit",
+    "cli",
+    "dotenvx",
+    "sops",
+    "encryption",
+    "ai-safety",
+    "environment-variables",
+    "secrets-management",
+    "developer-tools"
   ],
   "license": "MIT",
-  "engines": { "node": ">=18.0.0" },
-  "files": ["bin/", "src/", "README.md", "LICENSE"],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "README.md",
+    "LICENSE"
+  ],
   "dependencies": {
     "chalk": "^5.4.1",
     "cli-table3": "^0.6.5",

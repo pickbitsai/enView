@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>enview — environment manager</title>
+<style>
+:root{--bg:#0b0d14;--panel:#12151f;--panel2:#181c29;--line:rgba(255,255,255,.09);--text:#e7e9f2;--muted:#8b90a6;
+--accent:#4ade80;--warn:#fbbf24;--bad:#f87171;--mono:ui-monospace,"Cascadia Mono",Consolas,monospace}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 Inter,system-ui,sans-serif;padding:0 0 80px}
+header{position:sticky;top:0;z-index:10;background:rgba(11,13,20,.94);backdrop-filter:blur(10px);border-bottom:1px solid var(--line);padding:16px 24px}
+.bar{display:flex;align-items:center;gap:14px;max-width:1240px;margin:0 auto}
+h1{margin:0;font-size:16px;letter-spacing:.5px}
+h1 span{color:var(--accent)}
+.sub{color:var(--muted);font:11px/1.4 var(--mono)}
+.spacer{flex:1}
+main{max-width:1240px;margin:0 auto;padding:22px 24px}
+.project{margin:0 0 26px}
+.project>h2{margin:0 0 4px;font-size:15px}
+.project>.path{margin:0 0 10px;color:var(--muted);font:11px var(--mono)}
+.file{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;margin:0 0 12px}
+.file-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--panel2)}
+.file-name{font:600 13px var(--mono)}
+.chip{font:10px var(--mono);padding:3px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.chip.ok{color:var(--accent);border-color:rgba(74,222,128,.35)}
+.chip.warn{color:var(--warn);border-color:rgba(251,191,36,.35)}
+.chip.bad{color:var(--bad);border-color:rgba(248,113,113,.45)}
+.rows{display:grid}
+.row{display:grid;grid-template-columns:minmax(180px,280px) 1fr auto;gap:12px;align-items:center;padding:9px 16px;border-bottom:1px solid rgba(255,255,255,.05)}
+.row:last-child{border-bottom:0}
+.row:hover{background:rgba(255,255,255,.02)}
+.k{font:12px var(--mono);color:#cfd3e6;overflow:hidden;text-overflow:ellipsis}
+.k .flag{margin-left:7px;font-size:9px;color:var(--warn)}
+.v{font:12px var(--mono);color:var(--muted);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.v.shown{color:#fff;user-select:all}
+.actions{display:flex;gap:6px}
+button{font:11px var(--mono);background:transparent;border:1px solid var(--line);color:var(--muted);border-radius:7px;padding:5px 9px;cursor:pointer;transition:.15s}
+button:hover{border-color:var(--accent);color:var(--accent)}
+button.danger:hover{border-color:var(--bad);color:var(--bad)}
+button.primary{border-color:rgba(74,222,128,.4);color:var(--accent)}
+.file-foot{display:flex;gap:8px;flex-wrap:wrap;padding:11px 16px;border-top:1px solid var(--line);background:rgba(0,0,0,.18)}
+.empty{padding:26px;text-align:center;color:var(--muted)}
+dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:14px;padding:0;width:min(520px,92vw)}
+dialog::backdrop{background:rgba(4,6,12,.7)}
+.dlg-head{padding:16px 20px;border-bottom:1px solid var(--line);font:600 13px var(--mono)}
+.dlg-body{padding:18px 20px;display:grid;gap:12px}
+.dlg-foot{padding:14px 20px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end}
+label{display:grid;gap:5px;font:11px var(--mono);color:var(--muted)}
+input{background:#0a0c13;border:1px solid var(--line);border-radius:8px;color:var(--text);padding:9px 11px;font:12px var(--mono)}
+input:focus{outline:none;border-color:var(--accent)}
+.note{color:var(--muted);font:11px/1.5 var(--mono);margin:0}
+#toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);opacity:0;transition:.2s;
+background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 16px;font:12px var(--mono);pointer-events:none;z-index:50}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.banner{max-width:1240px;margin:0 auto 18px;padding:12px 16px;border:1px solid rgba(251,191,36,.3);background:rgba(251,191,36,.06);border-radius:10px;color:#e8d9ae;font-size:12.5px}
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <div>
+      <h1>🦅 en<span>view</span></h1>
+      <p class="sub" id="summary">loading…</p>
+    </div>
+    <div class="spacer"></div>
+    <button id="reload">reload</button>
+  </div>
+</header>
+
+<main>
+  <div class="banner">
+    Values are masked until you ask for one, and only that one key is sent. Nothing is cached or logged.
+    Every change writes a timestamped <span style="font-family:var(--mono)">.bak</span> first.
+  </div>
+  <div id="app"><p class="empty">Scanning…</p></div>
+</main>
+
+<dialog id="editor">
+  <form method="dialog">
+    <div class="dlg-head" id="dlg-title">Edit variable</div>
+    <div class="dlg-body">
+      <label>KEY <input id="dlg-key" autocomplete="off" spellcheck="false"></label>
+      <label>VALUE <input id="dlg-value" autocomplete="off" spellcheck="false"></label>
+      <p class="note" id="dlg-file"></p>
+    </div>
+    <div class="dlg-foot">
+      <button value="cancel">cancel</button>
+      <button class="primary" id="dlg-save" value="save">save</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast"></div>
+
+<script>
+const TOKEN = "__ENVIEW_TOKEN__";
+const api = async (path, options = {}) => {
+  const res = await fetch(path, {
+    ...options,
+    headers: { "x-enview-token": TOKEN, "content-type": "application/json", ...(options.headers || {}) },
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+  return body;
+};
+
+let toastTimer;
+function toast(message) {
+  const el = document.getElementById("toast");
+  el.textContent = message;
+  el.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("show"), 2200);
+}
+
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function gitChip(f) {
+  if (!f.inGitRepo) return '<span class="chip">not in git</span>';
+  if (f.gitTracked) return '<span class="chip bad" title="git is tracking this file — git rm --cached, then rotate">TRACKED</span>';
+  if (f.gitInHistory) return '<span class="chip bad" title="in git history on every clone — rotate">IN HISTORY</span>';
+  if (f.gitIgnored) return '<span class="chip ok">gitignored</span>';
+  return '<span class="chip bad">NOT gitignored</span>';
+}
+
+function render(data) {
+  const files = data.projects.flatMap((p) => p.files);
+  const sensitive = files.reduce((n, f) => n + f.keys.filter((k) => k.sensitive).length, 0);
+  document.getElementById("summary").textContent =
+    `${data.projects.length} projects · ${files.length} env files · ${sensitive} credential-shaped keys`;
+
+  const app = document.getElementById("app");
+  if (!data.projects.length) { app.innerHTML = '<p class="empty">No .env files found under the scanned roots.</p>'; return; }
+
+  app.innerHTML = data.projects.map((p) => `
+    <section class="project">
+      <h2>${esc(p.name)}</h2>
+      <p class="path">${esc(p.path)}</p>
+      ${p.files.map((f) => `
+        <div class="file">
+          <div class="file-head">
+            <span class="file-name">${esc(f.fileName)}</span>
+            <span class="chip">${esc(f.environment)}</span>
+            <span class="chip">${f.keys.length} keys</span>
+            ${f.encryption === "none" ? '<span class="chip warn">not encrypted</span>' : `<span class="chip ok">${esc(f.encryption)}</span>`}
+            ${gitChip(f)}
+            ${f.hasExample ? '<span class="chip ok">has .example</span>' : '<span class="chip warn">no .example</span>'}
+          </div>
+          <div class="rows">
+            ${f.keys.length ? f.keys.map((k) => `
+              <div class="row" data-file="${esc(f.filePath)}" data-key="${esc(k.key)}">
+                <div class="k">${esc(k.key)}${k.sensitive ? '<span class="flag">credential</span>' : ""}</div>
+                <div class="v" data-masked="${esc(k.masked)}">${k.empty ? '<em style="opacity:.5">empty</em>' : esc(k.masked)}</div>
+                <div class="actions">
+                  <button data-act="reveal" title="show this value">show</button>
+                  <button data-act="copy" title="copy to clipboard">copy</button>
+                  <button data-act="edit">edit</button>
+                  <button data-act="delete" class="danger">del</button>
+                </div>
+              </div>`).join("") : '<p class="empty">No variables in this file.</p>'}
+          </div>
+          <div class="file-foot" data-file="${esc(f.filePath)}">
+            <button data-act="add" class="primary">+ add variable</button>
+            ${!f.hasExample ? '<button data-act="generate-example">generate .env.example</button>' : ""}
+            ${f.inGitRepo && !f.gitIgnored ? '<button data-act="gitignore">add to .gitignore</button>' : ""}
+          </div>
+        </div>`).join("")}
+    </section>`).join("");
+}
+
+async function load() {
+  try { render(await api("/api/projects")); }
+  catch (error) { document.getElementById("app").innerHTML = `<p class="empty">${esc(error.message)}</p>`; }
+}
+
+const editor = document.getElementById("editor");
+let editing = null;
+
+function openEditor({ file, key, value, title }) {
+  editing = { file, originalKey: key };
+  document.getElementById("dlg-title").textContent = title;
+  document.getElementById("dlg-key").value = key || "";
+  document.getElementById("dlg-value").value = value || "";
+  document.getElementById("dlg-file").textContent = file;
+  editor.showModal();
+}
+
+editor.addEventListener("close", async () => {
+  if (editor.returnValue !== "save" || !editing) { editing = null; return; }
+  const key = document.getElementById("dlg-key").value.trim();
+  const value = document.getElementById("dlg-value").value;
+  const { file, originalKey } = editing;
+  editing = null;
+  if (!key) return;
+  try {
+    // A rename is a create plus a delete; do the create first so a failure cannot lose the value.
+    await api("/api/key", { method: "PUT", body: JSON.stringify({ file, key, value }) });
+    if (originalKey && originalKey !== key) {
+      await api("/api/key", { method: "DELETE", body: JSON.stringify({ file, key: originalKey }) });
+    }
+    toast(`saved ${key}`);
+    load();
+  } catch (error) { toast(error.message); }
+});
+
+document.addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-act]");
+  if (button) {
+    const act = button.dataset.act;
+    const row = button.closest(".row");
+    const foot = button.closest(".file-foot");
+    const file = (row || foot).dataset.file;
+    const key = row?.dataset.key;
+
+    try {
+      if (act === "reveal") {
+        const cell = row.querySelector(".v");
+        if (cell.classList.contains("shown")) {
+          cell.textContent = cell.dataset.masked;
+          cell.classList.remove("shown");
+          button.textContent = "show";
+          return;
+        }
+        const { value } = await api(`/api/value?file=${encodeURIComponent(file)}&key=${encodeURIComponent(key)}`);
+        cell.textContent = value;
+        cell.classList.add("shown");
+        button.textContent = "hide";
+        return;
+      }
+      if (act === "copy") {
+        const { value } = await api(`/api/value?file=${encodeURIComponent(file)}&key=${encodeURIComponent(key)}`);
+        await navigator.clipboard.writeText(value);
+        toast(`${key} copied to clipboard`);
+        return;
+      }
+      if (act === "edit") {
+        const { value } = await api(`/api/value?file=${encodeURIComponent(file)}&key=${encodeURIComponent(key)}`);
+        openEditor({ file, key, value, title: `Edit ${key}` });
+        return;
+      }
+      if (act === "delete") {
+        if (!confirm(`Delete ${key}?\n\nA .bak of the file is written first.`)) return;
+        await api("/api/key", { method: "DELETE", body: JSON.stringify({ file, key }) });
+        toast(`deleted ${key}`);
+        load();
+        return;
+      }
+      if (act === "add") { openEditor({ file, key: "", value: "", title: "Add variable" }); return; }
+      if (act === "generate-example") {
+        const result = await api("/api/action", { method: "POST", body: JSON.stringify({ file, action: "generate-example" }) });
+        toast(`wrote ${result.target.split(/[\\/]/).pop()}`);
+        load();
+        return;
+      }
+      if (act === "gitignore") {
+        const result = await api("/api/action", { method: "POST", body: JSON.stringify({ file, action: "gitignore" }) });
+        toast(result.added ? "added to .gitignore" : "already ignored");
+        load();
+        return;
+      }
+    } catch (error) { toast(error.message); }
+  }
+});
+
+document.getElementById("reload").addEventListener("click", load);
+load();
+</script>
+</body>
+</html>

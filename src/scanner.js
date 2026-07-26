@@ -258,7 +258,9 @@ const SENSITIVE_PATTERNS = [
   /github.?token/i, /webhook/i, /signing/i, /encryption/i,
 ];
 
-function detectSensitiveKeys(plaintextKeys) {
+// Exported so history scanning classifies a key the same way whether it is on disk or in a
+// historical blob — two different verdicts for the same key name would be worse than none.
+export function detectSensitiveKeys(plaintextKeys) {
   return plaintextKeys.filter(key =>
     SENSITIVE_PATTERNS.some(pattern => pattern.test(key))
   );

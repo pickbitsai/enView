@@ -136,6 +136,71 @@ enview drift ~/code
 └─────────────┴──────┴─────────────────┘
 ```
 
+### `enview history` — What you already committed
+
+A working-tree scan answers "what is exposed right now". It cannot answer the expensive question: *what did I commit last year and forget?* Deleting a `.env` and gitignoring it changes nothing about the copy in every clone, fork and CI cache — the credential is published until it is rotated.
+
+```bash
+enview history ~/code
+```
+
+```
+🕰️  enview history — 4 risky paths across 3 repos
+
+┌───────────────┬──────────────────────────────────┬─────────────────────────┬─────────────┬───────────────┐
+│ Repo          │ Path in history                  │ Kind                    │ Keys        │ Still tracked │
+├───────────────┼──────────────────────────────────┼─────────────────────────┼─────────────┼───────────────┤
+│ CoachMark     │ .env                             │ environment file        │ 4 sensitive │ no            │
+│ PantryPlanner │ android/app/release-keystore.jks │ private key or keystore │ —           │ no            │
+└───────────────┴──────────────────────────────────┴─────────────────────────┴─────────────┴───────────────┘
+```
+
+Walks `--all`, so a secret on an abandoned branch still counts. Scoped to risky *paths* — env files, private keys, keystores, `.npmrc`, service-account JSON — rather than grepping every blob, because a scan slow enough to be switched off protects nothing. Key names are recovered from historical blobs; values are never returned.
+
+### `enview ui` — Manage them
+
+The one place enview handles values. Everything else — CLI, library, any dashboard reading them — sees names and status only.
+
+```bash
+enview ui ~/code
+```
+
+Masked values with reveal and copy, add/edit/delete/rename, and one-click remediation for what the scan found: generate a `.env.example` with values stripped, add a file to `.gitignore`. Every write makes a timestamped `.bak` first.
+
+**Security model — one user, one machine.** Binds `127.0.0.1`; validates `Host` *and* `Origin` on every request, which is what defeats DNS rebinding; requires a token printed once in your terminal; no CORS, restrictive CSP, no telemetry, no external requests. Only files found by the scan can be touched — an allowlist, not path sanitising. Do not put it behind a tunnel, port-forward or reverse proxy; it has no multi-user concept.
+
+Values cross the wire one key at a time, only when you ask, and are never cached or logged.
+
+### `enview protect` — Keep it that way
+
+Working-tree audit plus history scan, exiting non-zero on anything critical. Built for cron, Task Scheduler or CI — a guard that always exits 0 is decoration.
+
+```bash
+enview protect ~/code                 # exits 1 if anything critical
+enview protect ~/code --quiet         # silent unless there is something to say
+enview protect ~/code --no-history    # much faster; skips the history walk
+enview protect ~/code --json          # for automation
+```
+
+```
+🛡️  enview protect — 4 critical findings
+   2 on disk · 2 in git history
+```
+
+Findings deduplicate across the two scans: when history has the real answer, the working-tree inference is dropped rather than reported twice.
+
+<details>
+<summary>Run it on a schedule</summary>
+
+```bash
+# cron — 9am daily
+0 9 * * * npx enview protect ~/code --quiet
+
+# Windows Task Scheduler
+schtasks /create /tn "enview protect" /tr "npx enview protect C:\code --quiet" /sc daily /st 09:00
+```
+</details>
+
 ## CI Integration
 
 Use `--json` for machine-readable output and `--strict` to fail builds:
