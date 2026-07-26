@@ -3,7 +3,7 @@
 Thanks for looking. enview is small on purpose — a scanner, a reporter, a local UI — so most changes are self-contained.
 
 ```bash
-git clone https://github.com/MrPickering/enView.git
+git clone https://github.com/pickbitsai/enView.git
 cd enView
 npm install
 npm test          # 37 checks, no network access required

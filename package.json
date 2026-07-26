@@ -51,12 +51,12 @@
     "commander": "^13.1.0"
   },
   "author": "PickBits.AI",
-  "homepage": "https://github.com/MrPickering/enView#readme",
+  "homepage": "https://github.com/pickbitsai/enView#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/MrPickering/enView.git"
+    "url": "git+https://github.com/pickbitsai/enView.git"
   },
   "bugs": {
-    "url": "https://github.com/MrPickering/enView/issues"
+    "url": "https://github.com/pickbitsai/enView/issues"
   }
 }
