@@ -383,7 +383,9 @@ function truncate(str, len) {
   return str.length > len ? str.slice(0, len - 1) + '…' : str;
 }
 
-function buildAuditReport(projects) {
+// Exported so the library API (src/index.js) can offer audit findings without a consumer having
+// to re-derive them from a raw scan. The CLI still uses it the same way.
+export function buildAuditReport(projects) {
   // Structured JSON audit for CI integration
   const findings = [];
   for (const project of projects) {

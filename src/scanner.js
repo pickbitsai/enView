@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 
 const ENV_PATTERNS = [
   '.env', '.env.*',
@@ -281,14 +281,20 @@ function getGitInfo(filePath, dir) {
   const result = { tracked: false, ignored: false, lastCommit: null, inGitRepo: false };
 
   try {
-    execSync('git rev-parse --git-dir', { cwd: dir, stdio: 'pipe' });
+    execFileSync('git', ['rev-parse', '--git-dir'], { cwd: dir, stdio: 'pipe' });
     result.inGitRepo = true;
   } catch {
     return result;
   }
 
+  // execFileSync, not execSync: a shell command string needs `2>/dev/null` to stay quiet, and
+  // cmd.exe cannot resolve that path — so on Windows the command failed every time, the catch
+  // ran, and EVERY file was reported as not-gitignored. That turned the audit's most important
+  // signal into a permanent false alarm. Passing argv directly needs no shell and no redirect
+  // (stdio 'pipe' already captures stderr), and it sidesteps quoting differences between
+  // platforms. git exits 1 for "not ignored", which is a throw, not an error.
   try {
-    const status = execSync(`git check-ignore "${filePath}" 2>/dev/null`, {
+    const status = execFileSync('git', ['check-ignore', filePath], {
       cwd: dir, stdio: 'pipe', encoding: 'utf-8',
     });
     result.ignored = status.trim().length > 0;
@@ -297,8 +303,9 @@ function getGitInfo(filePath, dir) {
   }
 
   try {
-    const log = execSync(
-      `git log -1 --format="%H|%aI|%s" -- "${path.basename(filePath)}" 2>/dev/null`,
+    const log = execFileSync(
+      'git',
+      ['log', '-1', '--format=%H|%aI|%s', '--', path.basename(filePath)],
       { cwd: dir, stdio: 'pipe', encoding: 'utf-8' }
     ).trim();
     if (log) {
