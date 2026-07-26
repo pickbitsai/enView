@@ -399,7 +399,23 @@ export function buildAuditReport(projects) {
           keys: f.sensitiveKeys,
         });
       }
-      if (f.inGitRepo && !f.gitIgnored && f.encryption.type === 'none') {
+      // A file git is merely not ignoring is a risk — one `git add -A` from disclosure.
+      // A file git is TRACKING is already in history, on every clone and every remote, and
+      // .gitignore cannot help. Rotation is the only remedy, so it gets its own finding rather
+      // than being folded into not_gitignored where it reads as the same problem.
+      if ((f.gitTracked || f.gitInHistory) && f.encryption.type === 'none' && f.plaintextKeys.length > 0) {
+        findings.push({
+          level: 'critical',
+          project: project.name,
+          file: f.filePath,
+          type: 'committed_secrets',
+          keys: f.sensitiveKeys,
+          tracked: f.gitTracked,
+          remedy: f.gitTracked
+            ? 'git is tracking this file: `git rm --cached`, add it to .gitignore, then rotate the credentials'
+            : 'no longer tracked, but still in history on every clone — rotate the credentials',
+        });
+      } else if (f.inGitRepo && !f.gitIgnored && f.encryption.type === 'none') {
         findings.push({
           level: 'critical',
           project: project.name,

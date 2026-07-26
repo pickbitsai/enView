@@ -186,6 +186,7 @@ function analyzeEnvFile(filePath, scanRoot) {
     modifiedAt: stat.mtime,
     size: stat.size,
     gitTracked: gitInfo.tracked,
+    gitInHistory: gitInfo.inHistory,
     gitIgnored: gitInfo.ignored,
     lastCommit: gitInfo.lastCommit,
     inGitRepo: gitInfo.inGitRepo,
@@ -278,7 +279,7 @@ function detectProjectRoot(dir, scanRoot) {
 }
 
 function getGitInfo(filePath, dir) {
-  const result = { tracked: false, ignored: false, lastCommit: null, inGitRepo: false };
+  const result = { tracked: false, inHistory: false, ignored: false, lastCommit: null, inGitRepo: false };
 
   try {
     execFileSync('git', ['rev-parse', '--git-dir'], { cwd: dir, stdio: 'pipe' });
@@ -302,6 +303,19 @@ function getGitInfo(filePath, dir) {
     result.ignored = false;
   }
 
+  // "Tracked" means git has this file in the index RIGHT NOW — ask git that question directly.
+  // Inferring it from `git log` conflated two different states: a file currently under version
+  // control, and a file that was committed once and later removed. Both leak, but they need
+  // different remedies, and calling the second one "tracked" overstates the first.
+  try {
+    execFileSync('git', ['ls-files', '--error-unmatch', filePath], { cwd: dir, stdio: 'pipe' });
+    result.tracked = true;
+  } catch {
+    result.tracked = false;
+  }
+
+  // Separately: does this path appear anywhere in history? A file removed from the index still
+  // has its secrets in every clone, so this stays a finding even when tracked is false.
   try {
     const log = execFileSync(
       'git',
@@ -310,11 +324,11 @@ function getGitInfo(filePath, dir) {
     ).trim();
     if (log) {
       const [hash, date, message] = log.split('|');
-      result.tracked = true;
+      result.inHistory = true;
       result.lastCommit = { hash: hash.slice(0, 8), date: new Date(date), message };
     }
   } catch {
-    // not tracked
+    // never committed
   }
 
   return result;
