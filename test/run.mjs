@@ -11,7 +11,7 @@ const envPath = join(dir, ".env");
 const ORIGINAL = [
   "# a comment that must survive",
   "",
-  'API_KEY="sk-test-abcdef123456"',
+  'API_KEY="sk-test-abcdef123456"', // gitleaks:allow — synthetic fixture, not a real key
   "PORT=3000",
   "EMPTY=",
   "QUOTED='single quoted value'",
@@ -86,6 +86,34 @@ check("untouched quoting preserved", content.includes(`API_KEY="sk-test-abcdef12
 check("single-quote style preserved", content.includes("QUOTED='single quoted value'"));
 check("backup created", readdirSync(dir).some((f) => f.startsWith(".env.bak.")));
 
+// A backup holds the value you just changed. If .gitignore does not cover it, editing a secret
+// creates a fresh exposure — `.env` as a pattern does not match `.env.bak.<stamp>`.
+{
+  const { execFileSync } = await import("node:child_process");
+  const repo = mkdtempSync(join(tmpdir(), "enview-bak-"));
+  execFileSync("git", ["init", "-q"], { cwd: repo, stdio: "pipe" });
+  writeFileSync(join(repo, ".gitignore"), ".env\n");
+  writeFileSync(join(repo, ".env"), "SECRET=old-value-to-be-rotated\n");
+  const inRepo = await startEnviewUi({ roots: [repo], port: 4183, maxDepth: 2 });
+  await fetch(`http://127.0.0.1:4183/api/key`, {
+    method: "PUT",
+    headers: { "x-enview-token": inRepo.token, "content-type": "application/json" },
+    body: JSON.stringify({ file: join(repo, ".env"), key: "SECRET", value: "new-value" }),
+  });
+  const gitignore = readFileSync(join(repo, ".gitignore"), "utf-8");
+  check("backup pattern added to .gitignore", gitignore.includes("*.bak.*"), gitignore);
+  const bak = readdirSync(repo).find((f) => f.startsWith(".env.bak."));
+  let ignored = false;
+  try {
+    execFileSync("git", ["check-ignore", join(repo, bak)], { cwd: repo, stdio: "pipe" });
+    ignored = true;
+  } catch { ignored = false; }
+  check("git actually ignores the backup", ignored);
+  check("original .env still ignored", gitignore.includes(".env"));
+  inRepo.server.close();
+  rmSync(repo, { recursive: true, force: true });
+}
+
 await call("/api/key", { method: "PUT", body: JSON.stringify({ file: envPath, key: "NEW_KEY", value: "hello world" }) });
 content = readFileSync(envPath, "utf-8");
 check("added key is quoted when it needs to be", /^NEW_KEY="hello world"$/m.test(content), content);
@@ -116,7 +144,7 @@ console.log("\n--- git history ---");
   run("init", "-q");
   run("config", "user.email", "t@t.test");
   run("config", "user.name", "t");
-  writeFileSync(join(repo, ".env"), "OPENAI_API_KEY=sk-committed-secret-value\n");
+  writeFileSync(join(repo, ".env"), "OPENAI_API_KEY=sk-committed-secret-value\n"); // gitleaks:allow — synthetic fixture
   run("add", "-A");
   run("commit", "-qm", "oops");
   // Remove it the way people actually do — delete the file and gitignore it, believing that

@@ -21,6 +21,7 @@
  */
 
 import { createServer } from 'node:http';
+import { execFileSync } from 'node:child_process';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -83,11 +84,43 @@ function serializeValue(value, quote) {
   return value;
 }
 
+/**
+ * Copy a file aside before modifying it.
+ *
+ * The backup holds the value you are about to change — including the secret you are rotating
+ * away — so it must not become a new exposure. A project .gitignore listing `.env` does NOT
+ * match `.env.bak.2026-01-01T00-00-00-000Z`: gitignore patterns are literal, so every backup
+ * would land untracked-but-unignored, one `git add -A` from being committed. Ensure the pattern
+ * covering backups exists before writing the first one.
+ */
 function backupFile(filePath) {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const backup = `${filePath}.bak.${stamp}`;
+  ensureBackupsIgnored(path.dirname(filePath));
   fs.copyFileSync(filePath, backup);
   return backup;
+}
+
+const BACKUP_PATTERN = '*.bak.*';
+
+function ensureBackupsIgnored(dir) {
+  try {
+    // Only meaningful inside a git repository.
+    execFileSync('git', ['rev-parse', '--git-dir'], { cwd: dir, stdio: 'pipe' });
+  } catch {
+    return false;
+  }
+  const gitignorePath = path.join(dir, '.gitignore');
+  let content = '';
+  try { content = fs.readFileSync(gitignorePath, 'utf-8'); } catch {}
+  if (content.split(/\r?\n/).some((line) => line.trim() === BACKUP_PATTERN)) return false;
+  const eol = content.includes('\r\n') ? '\r\n' : '\n';
+  const prefix = content && !content.endsWith('\n') && !content.endsWith('\r\n') ? eol : '';
+  fs.writeFileSync(
+    gitignorePath,
+    `${content}${prefix}${eol}# enview: edit backups contain the previous values, including rotated secrets${eol}${BACKUP_PATTERN}${eol}`
+  );
+  return true;
 }
 
 /** Mask a value for display. Length is hinted, never the content. */

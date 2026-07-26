@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    # The test suite shells out to git and asserts on gitignore behaviour, so it has to run on
+    # more than one platform: the bug that made every file report "not gitignored" was Windows-
+    # only and a Linux-only matrix would never have caught it.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: [20, 22]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm ci
+      - name: Configure git identity for fixture repos
+        run: |
+          git config --global user.email "ci@example.test"
+          git config --global user.name "ci"
+          git config --global init.defaultBranch main
+      - run: npm test
+
+  self-scan:
+    # enview auditing enview. A secrets tool whose own repo leaks is not a good look, and this
+    # catches a fixture that starts matching a real credential pattern.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - name: enview protect (this repo)
+        run: node bin/enview.js protect . --depth 4
