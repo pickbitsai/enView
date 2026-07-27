@@ -1,0 +1,104 @@
+name: Release
+
+# Publishes to npm via OIDC trusted publishing — no NPM_TOKEN, no OTP prompt.
+#
+# Why this exists: publishing by hand needs a one-time password, which means it can only ever be
+# done by a human at a keyboard, and the npm docs now discourage the token-with-2FA-bypass
+# alternative. Trusted publishing swaps both for a short-lived OIDC token that npm verifies
+# against this repository and this workflow file, so a leaked secret cannot publish and neither
+# can a different workflow.
+#
+# ONE-TIME SETUP (npmjs.com, per package — cannot be scripted):
+#   Package → Settings → Trusted Publisher → GitHub Actions
+#     Organization/user: pickbitsai      Repository: enView
+#     Workflow filename: release.yml     Environment: (leave blank)
+#
+# To cut a release:
+#   npm version patch|minor|major   # commits and tags
+#   git push --follow-tags
+#
+# The tag drives it. Every guard below can fail the run before anything is published — a release
+# gate that cannot refuse is not a gate.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write   # required for OIDC; without it npm falls back to looking for a token
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      # Runners ship an npm older than the one that understands OIDC trusted publishing.
+      # Without this the publish fails with an auth error that reads like a permissions problem.
+      - name: Use an npm that supports trusted publishing
+        run: |
+          npm install -g npm@latest
+          npm --version
+
+      - run: npm ci
+
+      - name: Configure git identity for fixture repos
+        run: |
+          git config --global user.email "ci@example.test"
+          git config --global user.name "ci"
+          git config --global init.defaultBranch main
+
+      - run: npm test
+
+      # enview auditing enview, on the exact tree about to be published.
+      - name: enview protect (this repo)
+        run: node bin/enview.js protect . --depth 4
+
+      - name: Tag must match package.json version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p 'require("./package.json").version')"
+          echo "tag=$TAG package.json=$PKG"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $PKG."
+            exit 1
+          fi
+
+      - name: Version must not already be published
+        run: |
+          NAME="$(node -p 'require("./package.json").name')"
+          VER="$(node -p 'require("./package.json").version')"
+          # A 404 here is the success case: nothing published at this version yet.
+          CODE="$(curl -s -o /dev/null -w '%{http_code}' "https://registry.npmjs.org/${NAME}/${VER}")"
+          if [ "$CODE" = "200" ]; then
+            echo "::error::${NAME}@${VER} is already published. Bump the version."
+            exit 1
+          fi
+          echo "${NAME}@${VER} is unpublished (HTTP $CODE) — proceeding."
+
+      # Trusted publishing attaches provenance automatically.
+      - name: Publish
+        run: npm publish --access public
+
+      - name: Confirm it resolves
+        run: |
+          NAME="$(node -p 'require("./package.json").name')"
+          VER="$(node -p 'require("./package.json").version')"
+          # The package document lags behind a successful publish by minutes; poll rather than
+          # failing a release that actually worked.
+          for i in $(seq 1 20); do
+            CODE="$(curl -s -o /dev/null -w '%{http_code}' "https://registry.npmjs.org/${NAME}/${VER}")"
+            if [ "$CODE" = "200" ]; then echo "${NAME}@${VER} is live."; exit 0; fi
+            echo "attempt $i: HTTP $CODE — waiting"; sleep 15
+          done
+          echo "::warning::Publish reported success but ${NAME}@${VER} has not propagated yet."
