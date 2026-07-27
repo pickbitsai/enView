@@ -170,6 +170,8 @@ enview ui ~/code
 
 Masked values with reveal and copy, add/edit/delete/rename, and one-click remediation for what the scan found: generate a `.env.example` with values stripped, add a file to `.gitignore`. Every write makes a timestamped `.bak` first.
 
+A revealed value re-masks itself after 30 seconds, with the countdown on the button — screen shares and recordings are a likelier way to lose a credential than an attacker is. The mask is a fixed width and no length is ever returned, so a short value and a long one look the same.
+
 **Security model — one user, one machine.** Binds `127.0.0.1`; validates `Host` *and* `Origin` on every request, which is what defeats DNS rebinding; requires a token printed once in your terminal; no CORS, restrictive CSP, no telemetry, no external requests. Only files found by the scan can be touched — an allowlist, not path sanitising. Do not put it behind a tunnel, port-forward or reverse proxy; it has no multi-user concept.
 
 Values cross the wire one key at a time, only when you ask, and are never cached or logged.

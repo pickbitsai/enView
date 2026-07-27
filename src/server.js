@@ -123,10 +123,21 @@ function ensureBackupsIgnored(dir) {
   return true;
 }
 
-/** Mask a value for display. Length is hinted, never the content. */
+/**
+ * Mask a value for display. FIXED width — the bullet count carries no information at all.
+ *
+ * This used to clamp to 8-24, which sounds like it hides the length and does not: any value
+ * inside that band rendered exactly as many bullets as it had characters. Only the outliers were
+ * protected. An exact length is a strong fingerprint for a credential type (a 40-char GitHub
+ * PAT, a fixed-length Stripe key) and a 4-character value is informative on its own, so the
+ * length is now withheld everywhere — here and in the JSON, which used to ship it outright.
+ *
+ * `empty` is reported separately as a boolean; that is the only length fact the UI needs.
+ */
+const MASK_WIDTH = 12;
 function mask(value) {
   if (!value) return '';
-  return '•'.repeat(Math.min(24, Math.max(8, value.length)));
+  return '•'.repeat(MASK_WIDTH);
 }
 
 // ---------------------------------------------------------------- file operations
@@ -142,7 +153,9 @@ function readEnvFile(filePath) {
     keys: pairs.map((p) => ({
       key: p.key,
       masked: mask(p.value),
-      length: p.value.length,
+      // No `length` field. It used to ship here and defeated the clamp in mask() one line above:
+      // the UI rendered a length-hiding mask while the same JSON carried the exact length.
+      // `empty` is the only length fact the UI needs, and it is a single bit.
       empty: p.value.length === 0,
       sensitive: sensitive.has(p.key),
       encrypted: /^(encrypted:|ENC\[)/.test(p.value),

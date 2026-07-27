@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
+import fs from 'node:fs';
 import os from 'node:os';
+import path from 'node:path';
 import chalk from 'chalk';
 import { scanDirectories, addGitignoreEntry, getAutoRoots, getSystemRoots } from '../src/scanner.js';
 import {
@@ -14,6 +16,21 @@ import {
   printProtectResults,
 } from '../src/reporter.js';
 
+// A path the user named but that does not exist is an ERROR, never an empty scan.
+//
+// Without this, `enview protect ./typo` printed "nothing critical, 0 projects checked" and exited
+// 0 — a green CI gate that examined nothing. "I looked and it is clean" and "I never looked" are
+// different claims, and only one of them is allowed to pass. The auto/system roots skip this
+// check because they are derived, not typed.
+function assertRootsExist(dirs) {
+  const missing = dirs.filter((d) => !fs.existsSync(d));
+  if (!missing.length) return;
+  console.error(chalk.red(`\n  Path not found:`));
+  for (const d of missing) console.error(chalk.red(`    ${path.resolve(d)}`));
+  console.error(chalk.dim(`\n  Refusing to report on directories that do not exist.\n`));
+  process.exit(2);
+}
+
 function resolveRoots(dirs, opts) {
   if (opts.system) {
     const roots = getSystemRoots();
@@ -25,6 +42,7 @@ function resolveRoots(dirs, opts) {
     console.log(chalk.dim(`\n  Scanning home directory: ${roots[0]}\n`));
     return { roots, scanOpts: { maxDepth: opts.depth ?? 5, broad: true } };
   }
+  assertRootsExist(dirs);
   return { roots: dirs, scanOpts: { maxDepth: opts.depth ?? 6 } };
 }
 

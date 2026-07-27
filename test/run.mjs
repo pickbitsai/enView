@@ -181,6 +181,53 @@ console.log("\n--- gitignore detection ---");
   rmSync(repo, { recursive: true, force: true });
 }
 
+// ---------------------------------------------------------------- a missing path is an error
+// The regression this locks down: `enview protect ./typo` printed a green tick and exited 0.
+// In CI that is a security gate reporting success on a directory it never opened. Every command
+// that takes paths must refuse, so the whole surface is asserted rather than just protect.
+console.log("\n--- missing paths are refused ---");
+{
+  const { execFileSync } = await import("node:child_process");
+  const { fileURLToPath } = await import("node:url");
+  const { dirname } = await import("node:path");
+  const bin = join(dirname(fileURLToPath(import.meta.url)), "..", "bin", "enview.js");
+  const ghost = join(dir, "no-such-directory");
+
+  const run = (args) => {
+    try {
+      execFileSync(process.execPath, [bin, ...args], { encoding: "utf8", stdio: "pipe" });
+      return 0;
+    } catch (e) { return e.status ?? -1; }
+  };
+
+  for (const cmd of ["scan", "audit", "keys", "drift", "protect"]) {
+    check(`${cmd} exits non-zero on a path that does not exist`, run([cmd, ghost]) === 2);
+  }
+  // The inverse, so this cannot be satisfied by a command that just always fails.
+  check("scan still succeeds on a real path", run(["scan", dir]) === 0);
+  // protect must still fail for the RIGHT reason — a real finding, not a bad path.
+  check("protect still exits 1 on real findings", run(["protect", dir]) === 1);
+}
+
+// ---------------------------------------------------------------- value length is not leaked
+// mask() clamps its bullet count to 8-24 precisely so the mask cannot be measured. Shipping the
+// true length in the same payload defeated that; this asserts the field is gone and stays gone.
+console.log("\n--- value length is not disclosed ---");
+{
+  const res = await call("/api/projects");
+  const body = await res.json();
+  const keys = body.projects.flatMap((p) => p.files).flatMap((f) => f.keys);
+  const apiKey = keys.find((k) => k.key === "API_KEY");
+  const short = keys.find((k) => k.key === "PORT");        // 4 chars
+  check("no length field on any key", keys.every((k) => k.length === undefined));
+  check("mask does not reveal true length", apiKey.masked.length !== "sk-test-abcdef123456".length);
+  // The real assertion: a 4-char value and a 20-char value must be indistinguishable. The old
+  // 8-24 clamp passed the check above while failing this one.
+  check("short and long values mask identically", short.masked === apiKey.masked);
+  check("empty is still reported", keys.find((k) => k.key === "EMPTY")?.empty === true);
+  check("raw value never appears in the listing", !JSON.stringify(body).includes("abcdef123456"));
+}
+
 console.log(`\n${fail ? `FAIL — ${fail} of ${pass + fail}` : `PASS — ${pass} checks`}`);
 server.close();
 rmSync(dir, { recursive: true, force: true });

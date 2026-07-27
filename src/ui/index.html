@@ -115,7 +115,11 @@ function toast(message) {
   toastTimer = setTimeout(() => el.classList.remove("show"), 2200);
 }
 
-const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+// Escapes ' as well as & < > ". The single quote is not optional paranoia: every attribute in
+// this file is double-quoted today, which is the only reason omitting it was safe. That is an
+// invariant no test enforces, and one future edit using single quotes would reintroduce
+// injection through a hostile key name in a cloned repo's .env.
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 function gitChip(f) {
   if (!f.inGitRepo) return '<span class="chip">not in git</span>';
@@ -205,6 +209,36 @@ editor.addEventListener("close", async () => {
   } catch (error) { toast(error.message); }
 });
 
+// A revealed value re-masks itself after 30 seconds.
+//
+// The threat here is not an attacker, it is a screen share, a recording, or walking away from
+// the desk. Before this, a revealed credential stayed on screen indefinitely, and the CSS makes
+// it select-all-on-click so it is easy to capture. The countdown in the button label exists so
+// the re-mask never feels like a glitch — you can watch it coming and click again if you need
+// longer.
+const REHIDE_SECONDS = 30;
+const rehideTimers = new WeakMap();
+
+function hideValue(cell, button) {
+  const timer = rehideTimers.get(cell);
+  if (timer) { clearInterval(timer); rehideTimers.delete(cell); }
+  cell.textContent = cell.dataset.masked;
+  cell.classList.remove("shown");
+  if (button) button.textContent = "show";
+}
+
+function startRehide(cell, button) {
+  let left = REHIDE_SECONDS;
+  const timer = setInterval(() => {
+    left -= 1;
+    // The row can be re-rendered out from under us by a refresh; stop rather than tick forever.
+    if (!cell.isConnected) { clearInterval(timer); rehideTimers.delete(cell); return; }
+    if (left <= 0) { hideValue(cell, button); return; }
+    button.textContent = `hide (${left}s)`;
+  }, 1000);
+  rehideTimers.set(cell, timer);
+}
+
 document.addEventListener("click", async (event) => {
   const button = event.target.closest("button[data-act]");
   if (button) {
@@ -218,15 +252,14 @@ document.addEventListener("click", async (event) => {
       if (act === "reveal") {
         const cell = row.querySelector(".v");
         if (cell.classList.contains("shown")) {
-          cell.textContent = cell.dataset.masked;
-          cell.classList.remove("shown");
-          button.textContent = "show";
+          hideValue(cell, button);
           return;
         }
         const { value } = await api(`/api/value?file=${encodeURIComponent(file)}&key=${encodeURIComponent(key)}`);
         cell.textContent = value;
         cell.classList.add("shown");
-        button.textContent = "hide";
+        button.textContent = `hide (${REHIDE_SECONDS}s)`;
+        startRehide(cell, button);
         return;
       }
       if (act === "copy") {
