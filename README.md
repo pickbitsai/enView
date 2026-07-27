@@ -32,10 +32,13 @@ enview is a zero-config CLI that scans your project directories and tells you th
 ## Install
 
 ```bash
-npx enview scan ~/code        # try it instantly
+npx @pickbitsai/enview scan ~/code        # try it instantly
 
-npm install -g enview          # or install globally
+npm install -g @pickbitsai/enview          # or install globally
 ```
+
+The package is scoped, but the command it installs is plain `enview` — every
+example below works as written once it's on your PATH.
 
 ## Commands
 
@@ -194,10 +197,10 @@ Findings deduplicate across the two scans: when history has the real answer, the
 
 ```bash
 # cron — 9am daily
-0 9 * * * npx enview protect ~/code --quiet
+0 9 * * * npx @pickbitsai/enview protect ~/code --quiet
 
 # Windows Task Scheduler
-schtasks /create /tn "enview protect" /tr "npx enview protect C:\code --quiet" /sc daily /st 09:00
+schtasks /create /tn "enview protect" /tr "npx @pickbitsai/enview protect C:\code --quiet" /sc daily /st 09:00
 ```
 </details>
 
@@ -208,14 +211,14 @@ Use `--json` for machine-readable output and `--strict` to fail builds:
 ```yaml
 # GitHub Actions
 - name: Audit secrets
-  run: npx enview audit --strict --json . > audit-results.json
+  run: npx @pickbitsai/enview audit --strict --json . > audit-results.json
 ```
 
 ```yaml
 # GitLab CI
 audit:secrets:
   script:
-    - npx enview audit --strict .
+    - npx @pickbitsai/enview audit --strict .
   allow_failure: false
 ```
 

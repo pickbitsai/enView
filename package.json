@@ -1,5 +1,5 @@
 {
-  "name": "enview",
+  "name": "@pickbitsai/enview",
   "version": "0.2.0",
   "description": "Cross-project .env file scanner, auditor, and drift detector. Know what secrets live where — without exposing them.",
   "type": "module",
