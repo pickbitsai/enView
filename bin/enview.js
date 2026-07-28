@@ -46,12 +46,19 @@ function resolveRoots(dirs, opts) {
   return { roots: dirs, scanOpts: { maxDepth: opts.depth ?? 6 } };
 }
 
+// Read the version from package.json rather than repeating it here. It was hardcoded, and
+// `--version` reported 0.2.0 for two releases after package.json moved on — a second source of
+// truth for one fact, with nothing asserting the two agreed. test/run.mjs now does.
+const pkg = JSON.parse(
+  fs.readFileSync(new URL('../package.json', import.meta.url), 'utf-8')
+);
+
 const program = new Command();
 
 program
   .name('enview')
   .description('Cross-project .env scanner, auditor, and drift detector.\nKnow what secrets live where — without exposing them.')
-  .version('0.2.0');
+  .version(pkg.version);
 
 program
   .command('scan')
