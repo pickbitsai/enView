@@ -1,6 +1,6 @@
 {
   "name": "@pickbitsai/enview",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Cross-project .env file scanner, auditor, and drift detector. Know what secrets live where — without exposing them.",
   "type": "module",
   "bin": {
@@ -37,7 +37,7 @@
   ],
   "license": "MIT",
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.12.0"
   },
   "files": [
     "bin/",
@@ -46,9 +46,9 @@
     "LICENSE"
   ],
   "dependencies": {
-    "chalk": "^5.4.1",
+    "chalk": "^6.0.0",
     "cli-table3": "^0.6.5",
-    "commander": "^13.1.0"
+    "commander": "^15.0.0"
   },
   "author": "PickBits.AI",
   "homepage": "https://github.com/pickbitsai/enView#readme",
