@@ -185,6 +185,21 @@ console.log("\n--- gitignore detection ---");
 // The regression this locks down: `enview protect ./typo` printed a green tick and exited 0.
 // In CI that is a security gate reporting success on a directory it never opened. Every command
 // that takes paths must refuse, so the whole surface is asserted rather than just protect.
+// ---------------------------------------------------------------- reported version is real
+// `--version` was hardcoded and reported 0.2.0 for two releases after package.json moved on.
+// One fact, two sources of truth, nothing asserting they agreed. This is that assertion.
+console.log("\n--- reported version matches package.json ---");
+{
+  const { execFileSync } = await import("node:child_process");
+  const { fileURLToPath } = await import("node:url");
+  const { dirname } = await import("node:path");
+  const here = dirname(fileURLToPath(import.meta.url));
+  const bin = join(here, "..", "bin", "enview.js");
+  const pkgVersion = JSON.parse(readFileSync(join(here, "..", "package.json"), "utf8")).version;
+  const reported = execFileSync(process.execPath, [bin, "--version"], { encoding: "utf8" }).trim();
+  check(`enview --version reports ${pkgVersion}`, reported === pkgVersion, `got ${reported}`);
+}
+
 console.log("\n--- missing paths are refused ---");
 {
   const { execFileSync } = await import("node:child_process");
