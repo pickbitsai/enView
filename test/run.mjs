@@ -134,6 +134,46 @@ check(".env.example keeps keys", /^API_KEY=$/m.test(example), example);
 check(".env.example strips every value", !example.includes("sk-test") && !example.includes("hello world"), example);
 check(".env.example keeps comments", example.includes("# a comment that must survive"));
 
+// ---------------------------------------------------------------- untrack
+console.log("\n--- untrack ---");
+{
+  const { execFileSync } = await import("node:child_process");
+  const repo = mkdtempSync(join(tmpdir(), "enview-untrack-"));
+  const run = (...args) => execFileSync("git", args, { cwd: repo, stdio: "pipe" });
+  run("init", "-q");
+  run("config", "user.email", "t@t.test");
+  run("config", "user.name", "t");
+  writeFileSync(join(repo, ".env"), "SECRET=still-tracked-value\n"); // gitleaks:allow — synthetic fixture
+  run("add", "-A");
+  run("commit", "-qm", "oops, committed a secret");
+
+  const isTracked = () => {
+    try { execFileSync("git", ["ls-files", "--error-unmatch", ".env"], { cwd: repo, stdio: "pipe" }); return true; }
+    catch { return false; }
+  };
+  check("fixture starts tracked", isTracked());
+
+  const inRepo = await startEnviewUi({ roots: [repo], port: 4184, maxDepth: 2 });
+  const untrackCall = (path, opts = {}) => fetch(`http://127.0.0.1:4184${path}`, {
+    ...opts,
+    headers: { "x-enview-token": inRepo.token, "content-type": "application/json", ...(opts.headers || {}) },
+  });
+
+  const res = await (await untrackCall("/api/action", {
+    method: "POST",
+    body: JSON.stringify({ file: join(repo, ".env"), action: "untrack" }),
+  })).json();
+  check("untrack reports ok", res.ok === true, JSON.stringify(res));
+  check("untrack adds to .gitignore", res.gitignoreAdded === true);
+  check("file no longer tracked by git", !isTracked());
+  check(".gitignore contains the filename", readFileSync(join(repo, ".gitignore"), "utf-8").includes(".env"));
+  check("working copy content is untouched", readFileSync(join(repo, ".env"), "utf-8") === "SECRET=still-tracked-value\n");
+  check("no backup written — git rm --cached never touches file contents", !readdirSync(repo).some((f) => f.startsWith(".env.bak.")));
+
+  inRepo.server.close();
+  rmSync(repo, { recursive: true, force: true });
+}
+
 // ---------------------------------------------------------------- git history
 console.log("\n--- git history ---");
 {
@@ -160,6 +200,43 @@ console.log("\n--- git history ---");
   check("reports it is no longer tracked", found?.stillTracked === false);
   check("recovers the key name from history", !!found?.sensitiveKeys.includes("OPENAI_API_KEY"), JSON.stringify(found?.keys));
   check("never returns the historical value", !JSON.stringify(histories).includes("sk-committed-secret-value"));
+  rmSync(repo, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------- history endpoint
+// Same fixture shape as the CLI-level history scan above, but exercised through the UI's own
+// HTTP endpoint — the thing the browser button actually calls.
+console.log("\n--- history endpoint ---");
+{
+  const { execFileSync } = await import("node:child_process");
+  const repo = mkdtempSync(join(tmpdir(), "enview-history-api-"));
+  const run = (...args) => execFileSync("git", args, { cwd: repo, stdio: "pipe" });
+  run("init", "-q");
+  run("config", "user.email", "t@t.test");
+  run("config", "user.name", "t");
+  writeFileSync(join(repo, ".env"), "OPENAI_API_KEY=sk-endpoint-secret-value\n"); // gitleaks:allow — synthetic fixture
+  run("add", "-A");
+  run("commit", "-qm", "oops");
+  rmSync(join(repo, ".env"));
+  writeFileSync(join(repo, ".gitignore"), ".env\n");
+  run("add", "-A");
+  run("commit", "-qm", "remove env");
+
+  const inRepo = await startEnviewUi({ roots: [repo], port: 4185, maxDepth: 2 });
+  const historyCall = (path) => fetch(`http://127.0.0.1:4185${path}`, { headers: { "x-enview-token": inRepo.token } });
+
+  const badRes = await historyCall(`/api/history?path=${encodeURIComponent(dir)}`);
+  check("path outside this server's scan allowlist is rejected", badRes.status === 404, `got ${badRes.status}`);
+
+  const body = await (await historyCall(`/api/history?path=${encodeURIComponent(repo)}`)).json();
+  const found = body.findings.find((f) => f.file === ".env");
+  check("history endpoint finds the deleted secret", !!found, JSON.stringify(body));
+  check("reports it is no longer tracked", found?.stillTracked === false);
+  check("recovers the key name", !!found?.keys.includes("OPENAI_API_KEY"), JSON.stringify(found));
+  check("remedy text present", typeof found?.remedy === "string" && found.remedy.length > 0);
+  check("never returns the historical value", !JSON.stringify(body).includes("sk-endpoint-secret-value"));
+
+  inRepo.server.close();
   rmSync(repo, { recursive: true, force: true });
 }
 

@@ -26,7 +26,8 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { scanDirectories, addGitignoreEntry, detectSensitiveKeys } from './scanner.js';
+import { scanDirectories, addGitignoreEntry, detectSensitiveKeys, untrackFile } from './scanner.js';
+import { scanHistories, historyFindings } from './history.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -239,10 +240,18 @@ export function createEnviewServer({ roots, port = 4174, token, maxDepth = 4 }) 
   // Only files discovered by a scan may be touched. A path arriving in a request is checked
   // against this set rather than sanitised — an allowlist cannot be escaped by clever encoding.
   let allowed = new Set();
+  // Same principle for project directories: the history endpoint shells out to `git` inside a
+  // client-supplied path, so that path must be one this scan actually found, not merely resolved.
+  // Includes the configured roots themselves, not just discovered project paths — a repo whose
+  // only .env was deleted long ago has no current file to be discovered by, but its history is
+  // exactly what this endpoint exists to find (mirrors the CLI's `history` command, which unions
+  // discovered project paths with the roots for the same reason).
+  let allowedProjects = new Set();
 
   const refresh = () => {
     const projects = scanDirectories(roots, { maxDepth });
     allowed = new Set(projects.flatMap((p) => p.files.map((f) => path.resolve(f.filePath))));
+    allowedProjects = new Set([...projects.map((p) => p.path), ...roots].map((p) => path.resolve(p)));
     return projects;
   };
   refresh();
@@ -251,6 +260,12 @@ export function createEnviewServer({ roots, port = 4174, token, maxDepth = 4 }) 
     if (!filePath) return null;
     const resolved = path.resolve(String(filePath));
     return allowed.has(resolved) ? resolved : null;
+  };
+
+  const resolveAllowedProject = (projectPath) => {
+    if (!projectPath) return null;
+    const resolved = path.resolve(String(projectPath));
+    return allowedProjects.has(resolved) ? resolved : null;
   };
 
   const server = createServer(async (request, response) => {
@@ -355,7 +370,23 @@ export function createEnviewServer({ roots, port = 4174, token, maxDepth = 4 }) 
           json(response, 200, { ok: true, added });
           return;
         }
+        if (body.action === 'untrack') {
+          const result = untrackFile(path.dirname(filePath), filePath);
+          json(response, 200, { ok: true, untracked: true, ...result });
+          return;
+        }
         json(response, 400, { error: `unknown action ${body.action}` });
+        return;
+      }
+
+      // Deliberately on-demand and scoped to one project, not folded into /api/projects: this
+      // walks `git log --all`, the explicitly slow path (see history.js) — fine for one repo on
+      // a click, not fine for every repo on every page load.
+      if (url.pathname === '/api/history' && request.method === 'GET') {
+        const projectPath = resolveAllowedProject(url.searchParams.get('path'));
+        if (!projectPath) { json(response, 404, { error: 'unknown project' }); return; }
+        const histories = scanHistories([projectPath], { detectSensitive: detectSensitiveKeys });
+        json(response, 200, { findings: historyFindings(histories) });
         return;
       }
 

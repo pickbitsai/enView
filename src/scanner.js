@@ -349,6 +349,14 @@ export function addGitignoreEntry(projectPath, fileName) {
   return true;
 }
 
+// Removes a file from git's index without touching the working copy, then makes sure it can't
+// be re-added by accident. Does NOT touch history — the remedy text callers show must say so.
+export function untrackFile(projectPath, filePath) {
+  execFileSync('git', ['rm', '--cached', '--ignore-unmatch', filePath], { cwd: projectPath, stdio: 'pipe' });
+  const gitignoreAdded = addGitignoreEntry(projectPath, path.basename(filePath));
+  return { gitignoreAdded };
+}
+
 function groupByProject(files) {
   const projects = new Map();
   for (const file of files) {
