@@ -235,7 +235,11 @@ function collectBody(request, limit = 256 * 1024) {
   });
 }
 
-export function createEnviewServer({ roots, port = 4174, token, maxDepth = 4 }) {
+// Allocated in ops-index/engines.json; a destructuring default is invisible to the port
+// checker's matchers, so the allocation is declared as a const it can see.
+const DEFAULT_PORT = 4174;
+
+export function createEnviewServer({ roots, port = DEFAULT_PORT, token, maxDepth = 4 }) {
   const authToken = token || randomBytes(24).toString('hex');
   // Only files discovered by a scan may be touched. A path arriving in a request is checked
   // against this set rather than sanitised — an allowlist cannot be escaped by clever encoding.
