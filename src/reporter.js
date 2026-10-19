@@ -57,9 +57,9 @@ export function printScanResults(projects, opts = {}) {
       const modified = formatDate(f.modifiedAt);
 
       table.push([
-        i === 0 ? chalk.bold(truncate(project.name, 20)) : '',
-        chalk.white(f.fileName),
-        chalk.dim(f.environment),
+        i === 0 ? chalk.bold(truncate(clean(project.name), 20)) : '',
+        chalk.white(clean(f.fileName)),
+        chalk.dim(clean(f.environment)),
         String(f.keys.length),
         enc,
         gitignore,
@@ -195,7 +195,7 @@ export function printAuditResults(projects, opts = {}) {
       : f.level === 'WARN'
         ? chalk.yellow.bold(f.level)
         : chalk.dim(f.level);
-    table.push([levelStr, f.project, f.file, f.message]);
+    table.push([levelStr, clean(f.project), clean(f.file), clean(f.message)]);
   }
 
   console.log(table.toString());
@@ -214,7 +214,9 @@ export function printAuditResults(projects, opts = {}) {
     }
     console.log(chalk.cyan(`  ${ICONS.locked} Encrypt your .env files with dotenvx: ${chalk.underline('https://dotenvx.com')}`));
     for (const p of unencryptedProjects) {
-      console.log(chalk.dim(`    $ cd ${p.path} && npx @dotenvx/dotenvx encrypt`));
+      const command = cdCommand(p.path, 'npx @dotenvx/dotenvx encrypt');
+      if (command) console.log(chalk.dim(`    $ ${command}`));
+      else console.log(`    ${clean(p.path)}${chalk.dim(' — path contains shell metacharacters; no runnable command printed. Please cd there yourself.')}`);
     }
     console.log();
     console.log(chalk.dim(`  Or run ${chalk.white('enview fix')} to add missing .gitignore entries and see per-project commands.`));
@@ -246,18 +248,18 @@ export function printKeysResults(projects, opts = {}) {
   console.log(chalk.bold(`\n${ICONS.key}  enview keys — key inventory (values never shown)\n`));
 
   for (const project of projects) {
-    console.log(chalk.bold(`  ${ICONS.project} ${project.name}`));
-    console.log(chalk.dim(`     ${project.path}\n`));
+    console.log(chalk.bold(`  ${ICONS.project} ${clean(project.name)}`));
+    console.log(chalk.dim(`     ${clean(project.path)}\n`));
 
     for (const f of project.files) {
-      console.log(`     ${chalk.underline(f.fileName)} ${chalk.dim(`(${f.environment})`)}`);
+      console.log(`     ${chalk.underline(clean(f.fileName))} ${chalk.dim(`(${clean(f.environment)})`)}`);
       for (const key of f.keys) {
         const isEnc = f.encryptedKeys.includes(key);
         const isSensitive = f.sensitiveKeys.includes(key);
         const icon = isEnc ? ICONS.locked : (isSensitive ? ICONS.warning : ICONS.unlocked);
         const label = isEnc
-          ? chalk.green(key)
-          : (isSensitive ? chalk.red(key) : chalk.white(key));
+          ? chalk.green(clean(key))
+          : (isSensitive ? chalk.red(clean(key)) : chalk.white(clean(key)));
         const tag = isSensitive && !isEnc ? chalk.red(' ← plaintext secret!') : '';
         console.log(`       ${icon} ${label}${tag}`);
       }
@@ -296,17 +298,17 @@ export function printDriftResults(projects, opts = {}) {
     if (driftKeys.length === 0) continue;
     hasDrift = true;
 
-    console.log(chalk.bold(`  ${ICONS.project} ${project.name}`));
+    console.log(chalk.bold(`  ${ICONS.project} ${clean(project.name)}`));
 
     const fileNames = project.files.map(f => f.fileName);
     const table = new Table({
-      head: [chalk.cyan('Key'), ...fileNames.map(n => chalk.cyan(n))],
+      head: [chalk.cyan('Key'), ...fileNames.map(n => chalk.cyan(clean(n)))],
       style: { head: [], border: ['dim'] },
     });
 
     for (const [key, envs] of driftKeys) {
       table.push([
-        chalk.white(key),
+        chalk.white(clean(key)),
         ...fileNames.map(n => envs[n] ? chalk.green('✓') : chalk.red('✗ missing')),
       ]);
     }
@@ -328,13 +330,13 @@ export function printFixResults(projects, fixActions) {
   if (fixActions.gitignoreAdded.length > 0) {
     console.log(chalk.green.bold('  .gitignore entries added:\n'));
     for (const entry of fixActions.gitignoreAdded) {
-      console.log(chalk.green(`    ${ICONS.check} ${entry.project} — added ${entry.fileName} to .gitignore`));
+      console.log(chalk.green(`    ${ICONS.check} ${clean(entry.project)} — added ${clean(entry.fileName)} to .gitignore`));
     }
     console.log();
   }
 
   if (fixActions.alreadyIgnored.length > 0) {
-    console.log(chalk.dim(`  Already gitignored: ${fixActions.alreadyIgnored.map(e => e.project + '/' + e.fileName).join(', ')}\n`));
+    console.log(chalk.dim(`  Already gitignored: ${fixActions.alreadyIgnored.map(e => clean(e.project) + '/' + clean(e.fileName)).join(', ')}\n`));
   }
 
   const unencryptedProjects = projects.filter(p =>
@@ -347,7 +349,9 @@ export function printFixResults(projects, fixActions) {
     console.log(chalk.white('    $ npm install -g @dotenvx/dotenvx\n'));
     console.log(chalk.dim('    Then encrypt each project:'));
     for (const p of unencryptedProjects) {
-      console.log(chalk.white(`    $ cd ${p.path} && dotenvx encrypt`));
+      const command = cdCommand(p.path, 'dotenvx encrypt');
+      if (command) console.log(chalk.white(`    $ ${command}`));
+      else console.log(`    ${clean(p.path)}${chalk.dim(' — path contains shell metacharacters; no runnable command printed. Please cd there yourself.')}`);
     }
     console.log();
     console.log(chalk.dim(`    Learn more: ${chalk.underline('https://dotenvx.com')}`));
@@ -360,6 +364,20 @@ export function printFixResults(projects, fixActions) {
 }
 
 // ─── helpers ─────────────────────────────────────────────
+
+// Disk and git text must stay visible without becoming terminal instructions.
+export function clean(value) {
+  return String(value ?? '').replace(/[\x00-\x1f\x7f-\x9f]/g, char => {
+    const code = char.charCodeAt(0);
+    return (code <= 0x7f ? '\\x' : '\\u00') + code.toString(16).padStart(2, '0');
+  });
+}
+
+// Only offer commands when the quoted path is inert across the supported shells.
+export function cdCommand(dir, command) {
+  if (!dir || /[^\p{L}\p{N} _.:\\\/~@+,=-]/u.test(dir)) return null;
+  return `cd "${dir}" && ${command}`;
+}
 
 function formatEncryption(enc) {
   if (enc.type === 'none') return chalk.red(`${ICONS.unlocked} none`);
@@ -460,8 +478,8 @@ export function printHistoryResults(histories, opts = {}) {
         ? (f.sensitiveKeys.length ? chalk.yellow(`${f.sensitiveKeys.length} sensitive`) : chalk.dim(`${f.keys.length} keys`))
         : chalk.dim('—');
       table.push([
-        repo.repoName,
-        truncate(f.filePath, 40),
+        clean(repo.repoName),
+        truncate(clean(f.filePath), 40),
         f.kind === 'key' ? chalk.red(f.why) : f.why,
         keys,
         f.stillTracked ? chalk.red('yes') : chalk.dim('no'),
@@ -497,7 +515,7 @@ export function printProtectResults(report) {
     const where = f.type === 'in_git_history' ? chalk.red('history') : chalk.yellow('on disk');
     const what = f.remedy
       || (f.type === 'plaintext_secrets' ? `${(f.keys || []).length} plaintext credential-shaped keys` : f.type);
-    table.push([where, f.project, truncate(f.file, 33), what]);
+    table.push([where, clean(f.project), truncate(clean(f.file), 33), what]);
   }
   console.log(table.toString());
   console.log('');

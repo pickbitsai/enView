@@ -11,7 +11,8 @@ name: Release
 # ONE-TIME SETUP (npmjs.com, per package — cannot be scripted):
 #   Package → Settings → Trusted Publisher → GitHub Actions
 #     Organization/user: pickbitsai      Repository: enView
-#     Workflow filename: release.yml     Environment: (leave blank)
+#     Workflow filename: release.yml     Environment: npm
+#   Package → Settings → Publishing access → "Require two-factor authentication and disallow tokens"
 #
 # To cut a release:
 #   npm version patch|minor|major   # commits and tags
@@ -19,6 +20,13 @@ name: Release
 #
 # The tag drives it. Every guard below can fail the run before anything is published — a release
 # gate that cannot refuse is not a gate.
+#
+# WHY TWO JOBS: the OIDC token is a publish credential, and any step in a job holding
+# `id-token: write` can mint one. `npm ci`, `npm test` and `enview protect` all execute
+# third-party code (chalk was itself compromised on npm in September 2025), so they run in a job
+# that cannot mint the token. The publish job installs nothing and runs no dependency code —
+# `npm publish` needs no node_modules for a package with no build step. Actions are pinned by
+# commit SHA in this file for the same reason: a moved tag must not be able to publish.
 
 on:
   push:
@@ -27,27 +35,18 @@ on:
 
 permissions:
   contents: read
-  id-token: write   # required for OIDC; without it npm falls back to looking for a token
 
 jobs:
-  release:
+  verify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
-
-      # Runners ship an npm older than the one that understands OIDC trusted publishing.
-      # Without this the publish fails with an auth error that reads like a permissions problem.
-      - name: Use an npm that supports trusted publishing
-        run: |
-          npm install -g npm@latest
-          npm --version
 
       - run: npm ci
 
@@ -85,6 +84,34 @@ jobs:
             exit 1
           fi
           echo "${NAME}@${VER} is unpublished (HTTP $CODE) — proceeding."
+
+  publish:
+    needs: verify
+    # Only a v* tag publishes. workflow_dispatch stays available for re-running a tag's release,
+    # but dispatching from a branch verifies and stops here.
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    # Scope the OIDC token to an environment so npm can require it (see setup above), and so the
+    # environment's tag rules and reviewers can gate publishing on GitHub's side too.
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write   # required for OIDC; without it npm falls back to looking for a token
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      # Runners ship an npm older than the one that understands OIDC trusted publishing.
+      # Pinned, not @latest: this job holds the publish credential, so it installs nothing that
+      # was not chosen on purpose.
+      - name: Use an npm that supports trusted publishing
+        run: |
+          npm install -g npm@12.2.0
+          npm --version
 
       # Trusted publishing attaches provenance automatically.
       - name: Publish

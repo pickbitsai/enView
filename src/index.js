@@ -5,7 +5,8 @@
  * pre-commit hook all want the same answer without shelling out and parsing a table.
  *
  * The contract this file exposes is deliberately narrower than the internals, and it is the only
- * part covered by semver. Import from "enview", not from "enview/src/...".
+ * part covered by semver. Import from "@pickbitsai/enview", not from its src/ files. (The bare
+ * name "enview" is not ours on npm — anything installed under it is someone else's code.)
  *
  * PRIVACY: nothing here ever returns a secret VALUE. Values are read only to classify them
  * (encrypted? placeholder? sensitive-looking?) and are discarded. What you get back is key names,

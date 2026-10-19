@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { execFileSync } from 'node:child_process';
+import { gitSync } from './git.js';
 
 const ENV_PATTERNS = [
   '.env', '.env.*',
@@ -284,20 +284,20 @@ function getGitInfo(filePath, dir) {
   const result = { tracked: false, inHistory: false, ignored: false, lastCommit: null, inGitRepo: false };
 
   try {
-    execFileSync('git', ['rev-parse', '--git-dir'], { cwd: dir, stdio: 'pipe' });
+    gitSync(['rev-parse', '--git-dir'], { cwd: dir, stdio: 'pipe' });
     result.inGitRepo = true;
   } catch {
     return result;
   }
 
-  // execFileSync, not execSync: a shell command string needs `2>/dev/null` to stay quiet, and
+  // Pass argv directly: a shell command string needs `2>/dev/null` to stay quiet, and
   // cmd.exe cannot resolve that path — so on Windows the command failed every time, the catch
   // ran, and EVERY file was reported as not-gitignored. That turned the audit's most important
   // signal into a permanent false alarm. Passing argv directly needs no shell and no redirect
   // (stdio 'pipe' already captures stderr), and it sidesteps quoting differences between
   // platforms. git exits 1 for "not ignored", which is a throw, not an error.
   try {
-    const status = execFileSync('git', ['check-ignore', filePath], {
+    const status = gitSync(['check-ignore', filePath], {
       cwd: dir, stdio: 'pipe', encoding: 'utf-8',
     });
     result.ignored = status.trim().length > 0;
@@ -310,7 +310,7 @@ function getGitInfo(filePath, dir) {
   // control, and a file that was committed once and later removed. Both leak, but they need
   // different remedies, and calling the second one "tracked" overstates the first.
   try {
-    execFileSync('git', ['ls-files', '--error-unmatch', filePath], { cwd: dir, stdio: 'pipe' });
+    gitSync(['ls-files', '--error-unmatch', filePath], { cwd: dir, stdio: 'pipe' });
     result.tracked = true;
   } catch {
     result.tracked = false;
@@ -319,8 +319,7 @@ function getGitInfo(filePath, dir) {
   // Separately: does this path appear anywhere in history? A file removed from the index still
   // has its secrets in every clone, so this stays a finding even when tracked is false.
   try {
-    const log = execFileSync(
-      'git',
+    const log = gitSync(
       ['log', '-1', '--format=%H|%aI|%s', '--', path.basename(filePath)],
       { cwd: dir, stdio: 'pipe', encoding: 'utf-8' }
     ).trim();
@@ -352,7 +351,7 @@ export function addGitignoreEntry(projectPath, fileName) {
 // Removes a file from git's index without touching the working copy, then makes sure it can't
 // be re-added by accident. Does NOT touch history — the remedy text callers show must say so.
 export function untrackFile(projectPath, filePath) {
-  execFileSync('git', ['rm', '--cached', '--ignore-unmatch', filePath], { cwd: projectPath, stdio: 'pipe' });
+  gitSync(['rm', '--cached', '--ignore-unmatch', filePath], { cwd: projectPath, stdio: 'pipe' });
   const gitignoreAdded = addGitignoreEntry(projectPath, path.basename(filePath));
   return { gitignoreAdded };
 }

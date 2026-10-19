@@ -21,13 +21,13 @@
  */
 
 import { createServer } from 'node:http';
-import { execFileSync } from 'node:child_process';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { scanDirectories, addGitignoreEntry, detectSensitiveKeys, untrackFile } from './scanner.js';
 import { scanHistories, historyFindings } from './history.js';
+import { gitSync } from './git.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -107,7 +107,7 @@ const BACKUP_PATTERN = '*.bak.*';
 function ensureBackupsIgnored(dir) {
   try {
     // Only meaningful inside a git repository.
-    execFileSync('git', ['rev-parse', '--git-dir'], { cwd: dir, stdio: 'pipe' });
+    gitSync(['rev-parse', '--git-dir'], { cwd: dir, stdio: 'pipe' });
   } catch {
     return false;
   }

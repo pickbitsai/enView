@@ -153,8 +153,8 @@ enview history ~/code
 ┌───────────────┬──────────────────────────────────┬─────────────────────────┬─────────────┬───────────────┐
 │ Repo          │ Path in history                  │ Kind                    │ Keys        │ Still tracked │
 ├───────────────┼──────────────────────────────────┼─────────────────────────┼─────────────┼───────────────┤
-│ CoachMark     │ .env                             │ environment file        │ 4 sensitive │ no            │
-│ PantryPlanner │ android/app/release-keystore.jks │ private key or keystore │ —           │ no            │
+│ billing-api   │ .env                             │ environment file        │ 4 sensitive │ no            │
+│ mobile-app    │ android/app/release-keystore.jks │ private key or keystore │ —           │ no            │
 └───────────────┴──────────────────────────────────┴─────────────────────────┴─────────────┴───────────────┘
 ```
 
@@ -197,30 +197,34 @@ Findings deduplicate across the two scans: when history has the real answer, the
 <details>
 <summary>Run it on a schedule</summary>
 
+Install once and schedule the installed binary. A scheduled `npx @pickbitsai/enview` fetches and runs whatever version was published most recently, every day, unattended — exactly the job you do not want a registry compromise to reach.
+
 ```bash
+npm install -g @pickbitsai/enview     # upgrade deliberately, after reading the changelog
+
 # cron — 9am daily
-0 9 * * * npx @pickbitsai/enview protect ~/code --quiet
+0 9 * * * enview protect ~/code --quiet
 
 # Windows Task Scheduler
-schtasks /create /tn "enview protect" /tr "npx @pickbitsai/enview protect C:\code --quiet" /sc daily /st 09:00
+schtasks /create /tn "enview protect" /tr "enview protect C:\code --quiet" /sc daily /st 09:00
 ```
 </details>
 
 ## CI Integration
 
-Use `--json` for machine-readable output and `--strict` to fail builds:
+Use `--json` for machine-readable output and `--strict` to fail builds. Pin the exact version you reviewed — an unpinned `npx` runs whatever was published last, inside a job that can see your CI secrets:
 
 ```yaml
 # GitHub Actions
 - name: Audit secrets
-  run: npx @pickbitsai/enview audit --strict --json . > audit-results.json
+  run: npx --yes @pickbitsai/enview@0.3.2 audit --strict --json . > audit-results.json
 ```
 
 ```yaml
 # GitLab CI
 audit:secrets:
   script:
-    - npx @pickbitsai/enview audit --strict .
+    - npx --yes @pickbitsai/enview@0.3.2 audit --strict .
   allow_failure: false
 ```
 

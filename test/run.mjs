@@ -320,6 +320,152 @@ console.log("\n--- value length is not disclosed ---");
   check("raw value never appears in the listing", !JSON.stringify(body).includes("abcdef123456"));
 }
 
+console.log("\n--- repo git config cannot execute code ---");
+{
+  const { execFileSync } = await import("node:child_process");
+  const { existsSync } = await import("node:fs");
+  const { scanDirectories, untrackFile } = await import("../src/scanner.js");
+  const { scanHistories } = await import("../src/history.js");
+  const { gitSync } = await import("../src/git.js");
+  const repo = mkdtempSync(join(tmpdir(), "enview-fsmonitor-"));
+  const marker = join(repo, "marker").replace(/\\/g, "/");
+  try {
+    execFileSync("git", ["init", "-q"], { cwd: repo, stdio: "pipe" });
+    writeFileSync(join(repo, ".env"), "API_TOKEN=abc123\n");
+    execFileSync("git", ["config", "core.fsmonitor", `echo ran > '${marker}'; false`], { cwd: repo, stdio: "pipe" });
+
+    // Prove the hook runs here before checking that enview blocks it.
+    execFileSync("git", ["ls-files"], { cwd: repo, stdio: "pipe" });
+    check("positive control: plain git executes repo fsmonitor", existsSync(marker));
+    rmSync(marker, { force: true });
+
+    scanDirectories([repo], { maxDepth: 2 });
+    check("directory scan does not execute repo fsmonitor", !existsSync(marker));
+    scanHistories([repo]);
+    check("history scan does not execute repo fsmonitor", !existsSync(marker));
+    untrackFile(repo, join(repo, ".env"));
+    check("untrack does not execute repo fsmonitor", !existsSync(marker));
+    const result = gitSync(["ls-files"], { cwd: repo, stdio: "pipe" });
+    check("gitSync does not execute repo fsmonitor", !existsSync(marker));
+    check("gitSync preserves the Buffer result", Buffer.isBuffer(result));
+    let threw = false;
+    try { gitSync(["ls-files", "--error-unmatch", "missing"], { cwd: repo, stdio: "pipe" }); }
+    catch (error) { threw = error.status !== 0; }
+    check("gitSync preserves non-zero exit throws", threw);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+}
+
+const {
+  clean, cdCommand, buildAuditReport, printScanResults, printKeysResults, printAuditResults,
+  printDriftResults, printHistoryResults, printProtectResults, printFixResults,
+} = await import("../src/reporter.js");
+const captureOutput = (print) => {
+  const log = console.log;
+  const lines = [];
+  try {
+    console.log = (...args) => lines.push(args.join(" "));
+    print();
+  } finally {
+    console.log = log;
+  }
+  return lines.join("\n");
+};
+const payload = "X\x1b]52;c;QUFBQQ==\x07\x1b[2KHIDE";
+const terminalProjects = [{
+  name: "fixture",
+  path: "/tmp/enview",
+  files: [".env", ".env.production"].map((fileName, i) => {
+    const keys = i === 0 ? [payload, "API_TOKEN"] : ["API_TOKEN"];
+    return {
+      fileName,
+      filePath: `/tmp/enview/${fileName}`,
+      projectDir: "/tmp/enview",
+      projectName: "fixture",
+      environment: i === 0 ? "development" : "production",
+      keys,
+      encryptedKeys: [],
+      plaintextKeys: keys,
+      sensitiveKeys: keys,
+      encryption: { type: "none", partial: false, encryptedCount: 0, totalCount: keys.length },
+      inGitRepo: true,
+      gitIgnored: false,
+      gitTracked: false,
+      gitInHistory: false,
+      lastCommit: null,
+      modifiedAt: new Date(),
+      size: 100,
+    };
+  }),
+}];
+const hasPayload = (text) => text.includes("\x1b]52") || text.includes("\x07") || text.includes("\x1b[2K");
+
+console.log("\n--- terminal output cannot carry escape sequences ---");
+{
+  for (const print of [printKeysResults, printAuditResults, printDriftResults]) {
+    const output = captureOutput(() => print(terminalProjects));
+    check(`${print.name} blocks terminal payloads`, !hasPayload(output));
+    check(`${print.name} keeps the key visible`, output.includes("\\x1b]52"));
+  }
+  check("C1 controls use visible Unicode escapes", clean("a\u009bb") === "a\\u009bb");
+  check("C0, DEL and C1 boundaries are escaped", clean("\x00\t\n\r\x1b\x1f\x7f\x80\x9f") === "\\x00\\x09\\x0a\\x0d\\x1b\\x1f\\x7f\\u0080\\u009f");
+  check("clean preserves printable text and converts nullish values", clean("café 中文 \\x1b") === "café 中文 \\x1b" && clean(null) === "" && clean(undefined) === "" && clean(42) === "42");
+
+  // Names and paths reach different output branches than key names.
+  const projects = terminalProjects.map((p) => ({
+    ...p, name: payload, path: `/tmp/${payload}`,
+    files: p.files.map((f) => ({ ...f, fileName: f.fileName + payload, environment: payload })),
+  }));
+  const before = JSON.stringify(projects);
+  for (const print of [printScanResults, printKeysResults, printAuditResults, printDriftResults]) {
+    check(`${print.name} escapes names and paths`, !hasPayload(captureOutput(() => print(projects))));
+  }
+  const histories = [{ repoName: payload, root: `/tmp/${payload}`, findings: [{
+    filePath: payload, kind: "env", why: "environment file", sensitiveKeys: [payload],
+    keys: [payload], stillTracked: false, firstCommitted: null, lastCommitted: null,
+  }] }];
+  const report = {
+    projects,
+    summary: { critical: 1, workingTree: 1, history: 0 },
+    findings: [{ type: "plaintext_secrets", project: payload, file: payload, keys: [payload] }],
+  };
+  const actions = {
+    gitignoreAdded: [{ project: payload, fileName: payload }],
+    alreadyIgnored: [{ project: payload, fileName: payload }],
+  };
+  check("history escapes repo names and file paths", !hasPayload(captureOutput(() => printHistoryResults(histories))));
+  check("protect escapes project names and file paths", !hasPayload(captureOutput(() => printProtectResults(report))));
+  check("fix escapes entries and project paths", !hasPayload(captureOutput(() => printFixResults(projects, actions))));
+
+  check("scan JSON stays byte-for-byte faithful", captureOutput(() => printScanResults(projects, { json: true })) === JSON.stringify(projects, null, 2));
+  check("history JSON stays byte-for-byte faithful", captureOutput(() => printHistoryResults(histories, { json: true })) === JSON.stringify(histories, null, 2));
+  check("audit JSON stays byte-for-byte faithful", captureOutput(() => printAuditResults(projects, { json: true })) === JSON.stringify(buildAuditReport(projects), null, 2));
+  const expectedKeys = { [payload]: Object.fromEntries(projects[0].files.map((f) => [f.fileName,
+    f.keys.map((name) => ({ name, encrypted: false, sensitive: true })),
+  ])) };
+  check("keys JSON stays byte-for-byte faithful", captureOutput(() => printKeysResults(projects, { json: true })) === JSON.stringify(expectedKeys, null, 2));
+  check("library audit keeps original names and keys", buildAuditReport(projects).findings[0].project === payload && buildAuditReport(projects).findings[0].keys[0] === payload);
+  check("human-readable reports do not mutate scan data", JSON.stringify(projects) === before);
+}
+
+console.log("\n--- suggested commands are not injectable ---");
+{
+  check("semicolon injection gets no command", cdCommand("/tmp/x; echo INJECTED; #", "dotenvx encrypt") === null);
+  check("command substitution gets no command", cdCommand("/tmp/$(id)", "x") === null);
+  check("ampersand injection gets no command", cdCommand("C:\\code\\a & calc", "x") === null);
+  check("Windows paths with spaces are quoted", cdCommand("C:\\Users\\A B\\code\\proj", "npx @dotenvx/dotenvx encrypt") === "cd \"C:\\Users\\A B\\code\\proj\" && npx @dotenvx/dotenvx encrypt");
+  check("Unicode and allowed punctuation are quoted", cdCommand("/tmp/É中文９ _-.:\\/~@+,=", "x") === "cd \"/tmp/É中文９ _-.:\\/~@+,=\" && x");
+  check("quotes, shell expansions and trailing controls get no command", ["\"", "'", "`", "%", "!", "|", "\n", "\r", "\x1b"].every((char) => cdCommand("/tmp/x" + char, "x") === null));
+  const projects = terminalProjects.map((p) => ({ ...p, path: "/tmp/x; echo INJECTED; #" }));
+  const actions = { gitignoreAdded: [], alreadyIgnored: [] };
+  for (const print of [printAuditResults, printFixResults]) {
+    const output = captureOutput(() => print(projects, actions));
+    check(`${print.name} omits injectable cd commands`, !output.includes("cd /tmp/x; echo") && !output.includes("cd \"/tmp/x;"));
+    check(`${print.name} explains manual navigation`, output.includes(projects[0].path) && output.includes("shell metacharacters") && output.includes("cd there yourself"));
+  }
+}
+
 console.log(`\n${fail ? `FAIL — ${fail} of ${pass + fail}` : `PASS — ${pass} checks`}`);
 server.close();
 rmSync(dir, { recursive: true, force: true });
